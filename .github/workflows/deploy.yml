@@ -1,0 +1,359 @@
+# =============================================================================
+# Template de CI/CD (GitOps) para repositórios de aplicação.
+# Copie para <repo-do-app>/.github/workflows/deploy.yml e ajuste:
+#   - env.INFRA_PROJECT     pasta do projeto em projects/ no repo de infra
+#   - APPS_JSON (job plan)  um item por app (= pasta projects/<p>/apps/<app>)
+#
+# Pipeline (por app afetado):
+#   plan → test (lint + testes) → build (imagem + scan Trivy) → deploy
+#                                                         └──► ci (check único)
+#
+# Fluxo de branches → ambientes:
+#   feature/*  ──PR──►  develop  ──PR──►  main
+#      │                   │                │
+#   PR: test + build    push: + deploy   push: + deploy
+#   (validação)           em develop       em prod
+#
+# Só os apps AFETADOS pelo push são testados/buildados/deployados (campo
+# `paths`). Buildam TODOS: workflow_dispatch, primeiro push de uma branch e
+# mudanças em .github/workflows/.
+#
+# O job `ci` resume o resultado num check só — é ele que a proteção da `main`
+# exige (configurado por `make github` no repo de infra).
+#
+# Secret necessário no repo do app (criado por `make github`):
+#   INFRA_DEPLOY_KEY  chave SSH privada com escrita no repo de infra.
+# Variável opcional do repo (Settings → Secrets and variables → Variables):
+#   TRIVY_GATE        vazio = scan só reporta (aba Security);
+#                     CRITICAL ou HIGH,CRITICAL = barra a imagem com CVE
+#                     corrigível nessas severidades.
+# =============================================================================
+name: build-and-deploy
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  INFRA_REPO: infra-devops-full/infra   # owner/repo da plataforma DevOps
+  INFRA_BRANCH: main                     # branch que o ArgoCD acompanha
+  INFRA_PROJECT: wlstore                 # pasta em projects/ no repo de infra
+  # develop → ambiente develop; main → ambiente prod.
+  DEPLOY_ENV: ${{ github.ref_name == 'main' && 'prod' || 'develop' }}
+  # PR só valida (sem push); push publica a imagem.
+  PUBLISH: ${{ github.event_name != 'pull_request' }}
+  # Toolchains dos testes (mesmas versões dos Dockerfiles).
+  NODE_VERSION: "24"
+  NPM_VERSION: "11.6.2"
+  PNPM_VERSION: "10.29.3"
+  JAVA_VERSION: "21"
+  # Registry npm de pacotes privados/internos (opcional). Ex.: pacotes da org no
+  # GitHub Packages → NPM_REGISTRY: https://npm.pkg.github.com e
+  # NPM_SCOPE: "@minha-org". Vazio = só o npmjs. O token é o GITHUB_TOKEN do
+  # run: nos testes como NODE_AUTH_TOKEN e no Docker como build secret
+  # `npm_token` (o Dockerfile lê /run/secrets/npm_token só no `npm ci`).
+  NPM_REGISTRY: https://npm.pkg.github.com   # @whitelabel-store/ui e /http
+  NPM_SCOPE: "@whitelabel-store"
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Decide quais apps testar/buildar a partir dos arquivos alterados.
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      apps: ${{ steps.plan.outputs.apps }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - id: plan
+        env:
+          # app:        nome da pasta em projects/<p>/apps/ (vira o nome da imagem)
+          # context:    contexto do docker build
+          # dockerfile: caminho do Dockerfile
+          # build-args: opcional, linhas KEY=valor separadas por \n
+          # paths:      prefixos de caminho que, se alterados, afetam o app
+          #             (inclua as libs compartilhadas que ele usa)
+          # setup:      toolchain dos testes: node | pnpm | java | "" (nenhuma)
+          # test:       comando de lint/testes, rodado na raiz do repo
+          #             ("" = sem testes; o build ainda roda)
+          APPS_JSON: |
+            [
+              {
+                "app": "vitrine-mfe",
+                "context": ".",
+                "dockerfile": "./Dockerfile",
+                "build-args": "",
+                "paths": [
+                  "src/",
+                  "public/",
+                  "package.json",
+                  "package-lock.json",
+                  ".npmrc",
+                  "next.config.js",
+                  "tsconfig.json",
+                  "postcss.config.mjs",
+                  "eslint.config.mjs",
+                  "vitest.config.ts",
+                  "Dockerfile",
+                  ".dockerignore"
+                ],
+                "setup": "node",
+                "test": "npm ci && npm run lint && npm run typecheck && npm test"
+              }
+            ]
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          apps = json.loads(os.environ["APPS_JSON"])
+          base = os.environ.get("PR_BASE") or os.environ.get("BEFORE") or ""
+          changed = None  # None = todos
+          if os.environ["EVENT"] != "workflow_dispatch" and base and set(base) != {"0"}:
+              try:
+                  changed = subprocess.check_output(
+                      ["git", "diff", "--name-only", base, os.environ["GITHUB_SHA"]], text=True
+                  ).split()
+              except subprocess.CalledProcessError:
+                  changed = None
+          if changed is not None and any(f.startswith(".github/workflows/") for f in changed):
+              changed = None
+          def affected(a):
+              return changed is None or any(f.startswith(p) for f in changed for p in a["paths"])
+          selected = [{k: v for k, v in a.items() if k != "paths"} for a in apps if affected(a)]
+          names = " ".join(a["app"] for a in selected)
+          print("arquivos alterados:", "todos" if changed is None else len(changed))
+          print("apps afetados:", names or "nenhum")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write("matrix=" + json.dumps({"include": selected}) + "\n")
+              out.write("apps=" + names + "\n")
+          PY
+
+  # Lint + testes de cada app afetado. Bloqueia build e deploy se falhar.
+  test:
+    needs: plan
+    if: needs.plan.outputs.apps != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read   # pacotes do NPM_REGISTRY (GitHub Packages)
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        if: matrix.setup == 'node' || matrix.setup == 'pnpm'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: ${{ env.NPM_REGISTRY }}
+          scope: ${{ env.NPM_SCOPE }}
+
+      # O lock dos apps é gerado com este npm; o npm mais novo da imagem do
+      # runner pode recusar o `npm ci` (mesmo motivo do pin nos Dockerfiles).
+      - name: npm ${{ env.NPM_VERSION }}
+        if: matrix.setup == 'node'
+        run: npm install -g "npm@${NPM_VERSION}"
+
+      - name: pnpm ${{ env.PNPM_VERSION }}
+        if: matrix.setup == 'pnpm'
+        run: corepack enable && corepack prepare "pnpm@${PNPM_VERSION}" --activate
+
+      # Testcontainers usa o Docker do runner — por isso os testes Java rodam
+      # direto no runner, não dentro de um container.
+      - uses: actions/setup-java@v6.0.1
+        if: matrix.setup == 'java'
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: Lint + testes (${{ matrix.app }})
+        if: matrix.test != ''
+        env:
+          TEST_CMD: ${{ matrix.test }}
+          CI: "true"
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NX_DAEMON: "false"
+          NX_NO_CLOUD: "true"
+        run: bash -euo pipefail -c "$TEST_CMD"
+
+  # Imagem + scan de vulnerabilidades. Publica só em push (develop/main).
+  build:
+    needs: [plan, test]
+    if: needs.plan.outputs.apps != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      security-events: write   # resultado do Trivy na aba Security
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Nome e tags da imagem
+        id: img
+        run: |
+          echo "name=${REGISTRY}/${GITHUB_REPOSITORY,,}/${{ matrix.app }}" >> "$GITHUB_OUTPUT"
+          echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          # Tag móvel por branch: main → latest, develop → develop.
+          if [ "$GITHUB_REF_NAME" = "main" ]; then
+            echo "channel=latest" >> "$GITHUB_OUTPUT"
+          else
+            echo "channel=develop" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-buildx-action@v4
+
+      # 1) Imagem amd64 local, só para o scan (o cache deixa o build final rápido).
+      - name: Build para scan (amd64)
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          build-args: ${{ matrix['build-args'] }}
+          secrets: |
+            npm_token=${{ secrets.GITHUB_TOKEN }}
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: scan/${{ matrix.app }}:ci
+          cache-from: type=gha,scope=${{ matrix.app }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.app }}
+
+      # 2) Relatório completo (HIGH/CRITICAL corrigíveis) na aba Security.
+      - name: Trivy — relatório
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: scan/${{ matrix.app }}:ci
+          format: sarif
+          output: trivy.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "0"
+
+      - uses: github/codeql-action/upload-sarif@v4.38.3
+        if: always() && hashFiles('trivy.sarif') != ''
+        continue-on-error: true   # repo sem code scanning não derruba o build
+        with:
+          sarif_file: trivy.sarif
+          category: trivy-${{ matrix.app }}
+
+      # 3) Gate: barra a imagem se houver CVE corrigível na severidade de
+      #    vars.TRIVY_GATE (vazio = não barra).
+      - name: Trivy — gate (${{ vars.TRIVY_GATE || 'só relatório' }})
+        if: vars.TRIVY_GATE != ''
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: scan/${{ matrix.app }}:ci
+          format: table
+          severity: ${{ vars.TRIVY_GATE }}
+          ignore-unfixed: true
+          exit-code: "1"
+          skip-setup-trivy: true
+
+      # 4) Imagem final multi-arch: amd64 (servidores/CI) + arm64 (k3d no Mac).
+      - uses: docker/setup-qemu-action@v4
+        if: env.PUBLISH == 'true'
+        with:
+          platforms: arm64
+
+      - uses: docker/login-action@v4
+        if: env.PUBLISH == 'true'
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v7
+        if: env.PUBLISH == 'true'
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          build-args: ${{ matrix['build-args'] }}
+          secrets: |
+            npm_token=${{ secrets.GITHUB_TOKEN }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.img.outputs.name }}:${{ steps.img.outputs.tag }}
+            ${{ steps.img.outputs.name }}:${{ steps.img.outputs.channel }}
+          cache-from: type=gha,scope=${{ matrix.app }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.app }}
+
+  deploy:
+    needs: [plan, build]
+    if: github.event_name != 'pull_request' && needs.plan.outputs.apps != ''
+    runs-on: ubuntu-latest
+    # Evita dois pushes simultâneos no repo de infra.
+    concurrency: infra-${{ github.repository }}
+    env:
+      # Só os apps buildados neste run — os outros mantêm a tag atual.
+      APPS: ${{ needs.plan.outputs.apps }}
+    steps:
+      - name: Confere o INFRA_DEPLOY_KEY
+        env:
+          INFRA_DEPLOY_KEY: ${{ secrets.INFRA_DEPLOY_KEY }}
+        run: |
+          if [ -z "$INFRA_DEPLOY_KEY" ]; then
+            echo "::error title=INFRA_DEPLOY_KEY ausente::Rode no repo de infra: make github PROJECT=${INFRA_PROJECT}  — ele cria a deploy key em ${INFRA_REPO} e o secret INFRA_DEPLOY_KEY neste repo. A imagem já foi publicada; só a atualização da tag ficou pendente."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ env.INFRA_REPO }}
+          ref: ${{ env.INFRA_BRANCH }}
+          ssh-key: ${{ secrets.INFRA_DEPLOY_KEY }}
+
+      - name: Atualiza image.tag no repo de infra
+        run: |
+          TAG="sha-${GITHUB_SHA::7}"
+          for APP in $APPS; do
+            FILE="projects/${INFRA_PROJECT}/apps/${APP}/values-${DEPLOY_ENV}.yaml"
+            yq -i ".image.tag = \"${TAG}\"" "$FILE"
+            echo "→ $FILE: image.tag=${TAG}"
+          done
+
+      - name: Commit + push
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add projects/
+          if git diff --cached --quiet; then echo "Nada a atualizar"; exit 0; fi
+          git commit -m "deploy(${INFRA_PROJECT}/${DEPLOY_ENV}): ${APPS} → sha-${GITHUB_SHA::7} [skip ci]"
+          for i in 1 2 3; do
+            git pull --rebase origin "$INFRA_BRANCH" && git push origin "HEAD:$INFRA_BRANCH" && exit 0
+            sleep $((i * 5))
+          done
+          exit 1
+
+  # Check único exigido pela proteção da main: passa se nada falhou
+  # (apps não afetados aparecem como "skipped", o que é ok).
+  ci:
+    if: always()
+    needs: [plan, test, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resultado
+        env:
+          RESULTS: ${{ needs.plan.result }} ${{ needs.test.result }} ${{ needs.build.result }}
+        run: |
+          echo "plan/test/build: $RESULTS"
+          for r in $RESULTS; do
+            case "$r" in success|skipped) ;; *) echo "::error::pipeline com falha ($r)"; exit 1 ;; esac
+          done
