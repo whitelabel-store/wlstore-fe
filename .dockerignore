@@ -1,0 +1,9 @@
+node_modules
+.next
+.git
+.github
+coverage
+*.tsbuildinfo
+.env*
+**/*.test.ts
+**/*.test.tsx
