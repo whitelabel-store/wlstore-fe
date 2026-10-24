@@ -15,7 +15,10 @@
  * - Build de produção: sem rewrites, a não ser que a variável `env` do app
  *   seja informada (ex.: PAINEL_URL=http://painel-mfe:4300).
  */
-const MICROFRONTENDS = [{ basePath: '/painel', env: 'PAINEL_URL', port: 4300 }];
+const MICROFRONTENDS = [
+  { basePath: '/painel', env: 'PAINEL_URL', port: 4300 },
+  { basePath: '/checkout', env: 'CHECKOUT_URL', port: 4400 },
+];
 
 const isProduction = process.env.NODE_ENV === 'production';
 
