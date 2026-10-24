@@ -12,6 +12,7 @@ app**:
 | --- | --- | --- |
 | vitrine | `/` | este |
 | painel do lojista | `/painel` | [wlstore-painel](https://github.com/whitelabel-store/wlstore-painel) |
+| checkout | `/checkout` | [wlstore-checkout](https://github.com/whitelabel-store/wlstore-checkout) |
 
 O que é comum (design system, cabeçalho, rodapé, cliente HTTP) vem dos pacotes
 versionados de [wlstore-platform-fe](https://github.com/whitelabel-store/wlstore-platform-fe).
@@ -27,8 +28,9 @@ npm run dev          # http://localhost:3000
 
 A vitrine precisa do `catalog-service` (repo
 [wlstore-be](https://github.com/whitelabel-store/wlstore-be)) em
-`http://localhost:8081`. Para ver `/painel` através da vitrine, suba também o
-`wlstore-painel` (porta 4300). Em dev, a vitrine encaminha `/painel/*` para ele.
+`http://localhost:8081`. Para ver `/painel` e `/checkout` através da vitrine, suba também o
+`wlstore-painel` (porta 4300) e o `wlstore-checkout` (porta 4400). Em dev, a
+vitrine encaminha `/painel/*` e `/checkout/*` para eles.
 
 ### Token do GitHub Packages
 
@@ -57,6 +59,7 @@ echo "//npm.pkg.github.com/:_authToken=$(gh auth token)" >> ~/.npmrc
 | `CATALOG_API_URL` | `http://localhost:8081` | catalog-service, chamado só no servidor |
 | `TENANT_ID` | tenant de dev | Tenant das chamadas, até existir login |
 | `PAINEL_URL` | `http://localhost:4300` | Só em dev: para onde a vitrine encaminha `/painel` |
+| `CHECKOUT_URL` | `http://localhost:4400` | Só em dev: para onde a vitrine encaminha `/checkout` |
 
 São lidas em runtime (Deployment), não no build. A imagem é a mesma em todos
 os ambientes.
