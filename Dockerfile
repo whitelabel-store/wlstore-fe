@@ -1,15 +1,12 @@
 # syntax=docker/dockerfile:1
 #
-# Imagem da vitrine (Next.js), a partir de templates/nextjs do repo de infra.
+# Imagem do front (Next.js), a partir de templates/nextjs do repo de infra.
 #
-# Diferença do template: os pacotes @whitelabel-store vêm do GitHub Packages,
-# que exige token. Ele entra como BUILD SECRET, só durante o `npm ci`, e não
-# fica em nenhuma camada da imagem:
+#   docker build -t wlstore-fe .
 #
-#   docker build --secret id=npm_token,env=NODE_AUTH_TOKEN -t wlstore-vitrine .
-#
-# Nada de NEXT_PUBLIC_*: a vitrine só chama o backend pelo servidor Next, e as
-# URLs (CATALOG_API_URL, TENANT_ID) são lidas em runtime, do Deployment.
+# Nada de NEXT_PUBLIC_*: o app só chama o backend pelo servidor Next, e as URLs
+# (CATALOG_API_URL, PRICING_API_URL, TENANT_ID) são lidas em runtime, do
+# Deployment. A mesma imagem serve todos os ambientes.
 
 # ---------------------------------------------------------------------------
 # 1. Dependências + build
@@ -21,11 +18,8 @@ WORKDIR /app
 ARG NPM_VERSION=11.6.2
 RUN npm install -g npm@${NPM_VERSION}
 
-COPY package.json package-lock.json .npmrc ./
-RUN --mount=type=secret,id=npm_token \
-    echo "//npm.pkg.github.com/:_authToken=$(cat /run/secrets/npm_token)" > /root/.npmrc \
-  && npm ci \
-  && rm /root/.npmrc
+COPY package.json package-lock.json ./
+RUN npm ci
 
 COPY . .
 
