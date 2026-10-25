@@ -1,52 +1,33 @@
-# wlstore-vitrine
+# wlstore-fe
 
-A **loja** da WLStore: home, busca, menu de categorias, vitrines e listagens de
-produtos. É o app padrão do domínio: atende `/` e tudo que nenhum outro
-microfrontend reivindica.
+Frontend da WLStore: **um app Next.js** com três áreas.
 
-Faz parte da arquitetura de microfrontends (Next.js Multi-Zones). Cada app tem
-repositório, build, deploy e versão próprios e **não importa código de outro
-app**:
-
-| App | Caminho | Repositório |
+| Área | Rotas | Backend |
 | --- | --- | --- |
-| vitrine | `/` | este |
-| painel do lojista | `/painel` | [wlstore-painel](https://github.com/whitelabel-store/wlstore-painel) |
-| checkout | `/checkout` | [wlstore-checkout](https://github.com/whitelabel-store/wlstore-checkout) |
+| Loja | `/` (home, busca `?q=`, filtros `?categoria=` e `?marca=`) | `catalog-service` |
+| Painel do lojista | `/painel` | `pricing-service` |
+| Checkout | `/checkout` → `/checkout/carrinho` | `order-service` (ainda sem endpoints: carrinho vazio) |
 
-O que é comum (design system, cabeçalho, rodapé, cliente HTTP) vem dos pacotes
-versionados de [wlstore-platform-fe](https://github.com/whitelabel-store/wlstore-platform-fe).
+O backend está em [wlstore-be](https://github.com/whitelabel-store/wlstore-be).
 
 ## Rodar
 
-Pré-requisitos: Node 22+, npm 11 e token do GitHub Packages (veja abaixo).
+Pré-requisitos: Node 22+ e npm 11.
 
 ```sh
 npm install
 npm run dev          # http://localhost:3000
 ```
 
-A vitrine precisa do `catalog-service` (repo
-[wlstore-be](https://github.com/whitelabel-store/wlstore-be)) em
-`http://localhost:8081`. Para ver `/painel` e `/checkout` através da vitrine, suba também o
-`wlstore-painel` (porta 4300) e o `wlstore-checkout` (porta 4400). Em dev, a
-vitrine encaminha `/painel/*` e `/checkout/*` para eles.
-
-### Token do GitHub Packages
-
-Os pacotes `@whitelabel-store/*` vêm do GitHub Packages, que exige token até
-para pacote público:
-
-```sh
-gh auth refresh -h github.com -s read:packages
-echo "//npm.pkg.github.com/:_authToken=$(gh auth token)" >> ~/.npmrc
-```
+Precisa do `catalog-service` em `http://localhost:8081` (e do
+`pricing-service` em `:8082` para o painel). Sem o backend, a loja mostra o
+aviso "Não foi possível carregar".
 
 ## Scripts
 
 | Comando | O que faz |
 | --- | --- |
-| `npm run dev` | Servidor de desenvolvimento na porta 3000 |
+| `npm run dev` | Servidor de desenvolvimento (porta 3000) |
 | `npm run build` / `npm start` | Build e servidor de produção |
 | `npm run lint` | ESLint (regras do Next) |
 | `npm run typecheck` | TypeScript |
@@ -54,40 +35,50 @@ echo "//npm.pkg.github.com/:_authToken=$(gh auth token)" >> ~/.npmrc
 
 ## Variáveis de ambiente
 
+Lidas em runtime pelo servidor Next (a mesma imagem serve todos os ambientes):
+
 | Variável | Padrão | Descrição |
 | --- | --- | --- |
-| `CATALOG_API_URL` | `http://localhost:8081` | catalog-service, chamado só no servidor |
+| `CATALOG_API_URL` | `http://localhost:8081` | catalog-service |
+| `PRICING_API_URL` | `http://localhost:8082` | pricing-service |
 | `TENANT_ID` | tenant de dev | Tenant das chamadas, até existir login |
-| `PAINEL_URL` | `http://localhost:4300` | Só em dev: para onde a vitrine encaminha `/painel` |
-| `CHECKOUT_URL` | `http://localhost:4400` | Só em dev: para onde a vitrine encaminha `/checkout` |
-
-São lidas em runtime (Deployment), não no build. A imagem é a mesma em todos
-os ambientes.
 
 ## Estrutura
 
-Cada feature segue o padrão componente → hook (TanStack Query) → Server Action
-→ `http/` → backend, com testes ao lado de cada arquivo:
-
 ```
 src/
-├── app/                      rotas (home com ?q=, ?categoria=, ?marca=)
-├── config/api.ts             cliente do catalog-service
-├── shared/                   tipos e helpers de teste comuns às features
-└── features/
-    ├── category-navigation/  menu "Todas as categorias"
-    ├── products/             ProductCard, ProductShelf (vitrine e grade)
-    └── pricing/              exibição de preço (PriceTag, DiscountBadge, parcelas)
+├── app/
+│   ├── layout.tsx            raiz: fontes, tema, React Query
+│   ├── (loja)/               / — cabeçalho com busca, menu de categorias, rodapé
+│   ├── painel/               /painel — navegação do painel
+│   └── checkout/             /checkout — cabeçalho enxuto
+├── components/
+│   ├── ui/                   componentes shadcn/ui
+│   ├── store-header.tsx      cabeçalho da loja (aviso, logo, busca)
+│   ├── store-footer.tsx
+│   ├── section-nav.tsx       navegação de área (painel)
+│   └── providers/            QueryProvider
+├── config/                   um cliente HTTP por serviço (api.ts = catalog, pricing-api.ts)
+├── features/                 category-navigation, products, pricing, prices, cart
+├── lib/                      utils (cn), fonts, http (cliente ky + ApiError)
+└── styles/globals.css        tema do design system WLStore (Tailwind v4)
 ```
 
-**Links:** dentro da vitrine, `next/link`. Para outro app (ex.: `/painel`),
-`<a>`, porque é outro runtime Next e a navegação recarrega o documento.
+Cada feature segue o padrão componente → hook (TanStack Query) → Server Action
+→ `http/` → backend, com testes ao lado de cada arquivo. As regras estão em
+[skills/SKILLS.md](skills/SKILLS.md).
 
-## Docker
+Novo componente shadcn: `npx shadcn@latest add dialog` (os aliases `@/` estão
+em `components.json`).
+
+## Deploy
+
+O workflow `.github/workflows/deploy.yml` (template da
+[plataforma](https://github.com/infra-devops-full/infra)) testa, builda a
+imagem `ghcr.io/whitelabel-store/wlstore-fe/wlstore-fe` e grava a tag em
+`projects/wlstore/apps/wlstore-fe/` no repo de infra; o ArgoCD aplica.
+`develop` → ambiente develop; `main` → prod.
 
 ```sh
-docker build --secret id=npm_token,env=NODE_AUTH_TOKEN -t wlstore-vitrine .
+docker build -t wlstore-fe .
 ```
-
-O token do GitHub Packages entra como build secret, só no `npm ci`, e não fica
-na imagem.

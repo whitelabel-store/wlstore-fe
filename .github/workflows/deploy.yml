@@ -56,8 +56,8 @@ env:
   # NPM_SCOPE: "@minha-org". Vazio = só o npmjs. O token é o GITHUB_TOKEN do
   # run: nos testes como NODE_AUTH_TOKEN e no Docker como build secret
   # `npm_token` (o Dockerfile lê /run/secrets/npm_token só no `npm ci`).
-  NPM_REGISTRY: https://npm.pkg.github.com   # @whitelabel-store/ui e /http
-  NPM_SCOPE: "@whitelabel-store"
+  NPM_REGISTRY: ""
+  NPM_SCOPE: ""
 
 concurrency:
   group: build-${{ github.ref }}
@@ -89,7 +89,7 @@ jobs:
           APPS_JSON: |
             [
               {
-                "app": "vitrine-mfe",
+                "app": "wlstore-fe",
                 "context": ".",
                 "dockerfile": "./Dockerfile",
                 "build-args": "",
@@ -98,7 +98,6 @@ jobs:
                   "public/",
                   "package.json",
                   "package-lock.json",
-                  ".npmrc",
                   "next.config.js",
                   "tsconfig.json",
                   "postcss.config.mjs",
