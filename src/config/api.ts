@@ -1,12 +1,11 @@
-import { createHttpClient, resolveBaseUrl } from '@whitelabel-store/http';
+import { createHttpClient, resolveBaseUrl } from '@/lib/http';
 
 // Tenant fixo enquanto não existe login; depois vem da sessão.
 const DEV_TENANT_ID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 
 /**
- * Instância única para o catalog-service. Usada só no servidor (Server
- * Actions): em cada app que renderiza uma feature deste pacote, defina
- * CATALOG_API_URL com o endereço interno do serviço.
+ * Cliente do catalog-service. Usado só no servidor (Server Actions); em
+ * produção, CATALOG_API_URL aponta para o Service interno.
  */
 export const api = createHttpClient({
   baseUrl: resolveBaseUrl({

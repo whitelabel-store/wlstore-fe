@@ -1,5 +1,0 @@
-/* Tema e tokens WLStore vêm do @whitelabel-store/ui (wlstore-platform-fe). */
-@import '@whitelabel-store/ui/globals.css';
-
-/* Classes Tailwind usadas neste app. */
-@source '../**/*.{ts,tsx}';

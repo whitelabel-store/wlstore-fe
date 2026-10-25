@@ -1,6 +1,6 @@
 'use client';
 
-import { cn } from '@whitelabel-store/ui/lib/utils';
+import { cn } from '@/lib/utils';
 import Link from 'next/link';
 import { useGetProducts } from '../../hooks/use-get-products';
 import type { ProductsQuery } from '../../types';

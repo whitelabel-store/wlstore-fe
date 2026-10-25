@@ -1,4 +1,4 @@
-import { cn } from '@whitelabel-store/ui/lib/utils';
+import { cn } from '@/lib/utils';
 import { discountPercent, formatBRL, installments, type InstallmentRule } from '../../utils/price';
 
 interface PriceTagProps {

@@ -1,4 +1,4 @@
-import { cn } from '@whitelabel-store/ui/lib/utils';
+import { cn } from '@/lib/utils';
 import { ChevronRightIcon } from 'lucide-react';
 import Link from 'next/link';
 import type { ReactNode } from 'react';

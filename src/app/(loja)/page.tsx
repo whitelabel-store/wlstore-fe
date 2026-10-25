@@ -1,4 +1,4 @@
-import { ProductShelf } from '../features/products/components/ProductShelf';
+import { ProductShelf } from '../../features/products/components/ProductShelf';
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
