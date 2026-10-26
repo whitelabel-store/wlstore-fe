@@ -1,4 +1,4 @@
-import { ProductShelf } from '../../features/products/components/ProductShelf';
+import { ProductShelf } from "../../features/products/components/ProductShelf";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
@@ -17,7 +17,7 @@ const HomePage = async ({ searchParams }: { searchParams: SearchParams }) => {
     return (
       <main>
         <ProductShelf
-          title={title ? `Resultados para “${title}”` : (brand ?? 'Produtos')}
+          title={title ? `Resultados para “${title}”` : (brand ?? "Produtos")}
           layout="grid"
           query={{ title, categorySlug, brand, size: 24 }}
         />
@@ -30,8 +30,9 @@ const HomePage = async ({ searchParams }: { searchParams: SearchParams }) => {
       <ProductShelf
         eyebrow="Acabou de chegar"
         title="Novidades"
-        query={{ sort: 'createdAt,desc', size: 12 }}
+        query={{ sort: "createdAt,desc", size: 12 }}
       />
+      <div>Test</div>
     </main>
   );
 };
