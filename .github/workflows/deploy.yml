@@ -260,7 +260,7 @@ jobs:
           ignore-unfixed: true
           exit-code: "0"
 
-      - uses: github/codeql-action/upload-sarif@v4.38.3
+      - uses: github/codeql-action/upload-sarif@v4.39.1
         if: always() && hashFiles('trivy.sarif') != ''
         continue-on-error: true   # repo sem code scanning não derruba o build
         with:
