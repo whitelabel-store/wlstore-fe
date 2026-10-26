@@ -5,5 +5,7 @@ build
 coverage
 *.tsbuildinfo
 next-env.d.ts
-.env*.local
+# Variáveis de ambiente: só o .env.example vai para o Git (inclusive em subpastas).
+.env*
+!.env.example
 .DS_Store
