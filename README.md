@@ -16,7 +16,8 @@ Pré-requisitos: Node 22+ e npm 11.
 
 ```sh
 npm install
-npm run dev          # http://localhost:3000
+cp .env.example .env   # uma vez (valores locais)
+npm run dev            # http://localhost:3000
 ```
 
 Precisa do `catalog-service` em `http://localhost:8081` (e do
@@ -35,13 +36,43 @@ aviso "Não foi possível carregar".
 
 ## Variáveis de ambiente
 
-Lidas em runtime pelo servidor Next (a mesma imagem serve todos os ambientes):
+Lidas em runtime pelo **servidor** Next (Server Actions), num lugar só:
+`src/config/env.ts`. Nenhuma é `NEXT_PUBLIC_*`, então a mesma imagem serve
+develop e prod.
 
-| Variável | Padrão | Descrição |
+| Variável | Local (`.env`) | Cluster (repo de infra, `values.yaml`) | Descrição |
+| --- | --- | --- | --- |
+| `CATALOG_API_URL` | `http://localhost:8081` | `http://catalog-service:8081` | catalog-service |
+| `PRICING_API_URL` | `http://localhost:8082` | `http://pricing-service:8082` | pricing-service |
+| `TENANT_ID` | tenant de dev | o mesmo, explícito | tenant das chamadas, até existir login |
+| `NEXT_TELEMETRY_DISABLED` | `1` | `1` | telemetria anônima do Next |
+
+### Arquivos por ambiente
+
+| Arquivo | Vale em | Vai para o Git? |
 | --- | --- | --- |
-| `CATALOG_API_URL` | `http://localhost:8081` | catalog-service |
-| `PRICING_API_URL` | `http://localhost:8082` | pricing-service |
-| `TENANT_ID` | tenant de dev | Tenant das chamadas, até existir login |
+| `.env.example` | documentação de todas as variáveis | **sim** (o único) |
+| `.env` | local, qualquer modo | não |
+| `.env.development` | só `npm run dev` (ex.: apontar para o backend do cluster develop) | não |
+| `.env.production` | só `npm run build` / `npm start` na sua máquina | não |
+| `.env.local` | ajustes pessoais (prioridade maior) | não |
+
+develop e prod (cluster) **não usam arquivo**: a imagem não leva `.env`
+(`.dockerignore`) e os valores vêm de `projects/wlstore/apps/wlstore-fe/values*.yaml`
+no repo de infra.
+
+### Validação
+
+- `npm run dev`: faltou uma variável → usa o padrão local.
+- `npm start` e no cluster: faltou uma → o servidor **não sobe** e diz qual
+  falta e onde configurar (`src/instrumentation.ts`). No Kubernetes aparece
+  como `CrashLoopBackOff` com essa mensagem no log do pod.
+- `npm run build` não exige as variáveis (a imagem é construída sem elas).
+
+Variável nova: adicione em `src/config/env.ts` (com o padrão local), no
+`.env.example` e nos values do repo de infra. Segredo (token, chave):
+`projects/wlstore/secrets/<env>.env` no repo de infra + `make seal`, nunca
+nos values nem aqui.
 
 ## Estrutura
 
