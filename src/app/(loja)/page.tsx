@@ -32,7 +32,6 @@ const HomePage = async ({ searchParams }: { searchParams: SearchParams }) => {
         title="Novidades"
         query={{ sort: "createdAt,desc", size: 12 }}
       />
-      <div>Test do rollback</div>
     </main>
   );
 };
