@@ -339,7 +339,7 @@ jobs:
       #    workflow, o cosign assina o digest e registra no log público. O
       #    Kyverno do cluster só aceita imagem com essa assinatura
       #    (k8s/kyverno-image-signatures.yaml). cosign v2: formato .sig.
-      - uses: sigstore/cosign-installer@v4.1.2
+      - uses: sigstore/cosign-installer@v4.1.3
         if: env.PUBLISH == 'true'
         with:
           cosign-release: v2.6.5
